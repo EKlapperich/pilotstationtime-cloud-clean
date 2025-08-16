@@ -8,28 +8,34 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type Roster = {
-  id: number;
-  gc: string;
-  location: string;
-  other: string;
+type GCRow = {
+  id: string;             // uuid
+  gcCode: string | null;  // 3-letter code
+  location: string | null;
+  other: string | null;
 };
 
 export default function HomePage() {
-  const [rows, setRows] = useState<Roster[]>([]);
+  const [rows, setRows] = useState<GCRow[]>([]);
 
   useEffect(() => {
-    fetchRoster();
+    const load = async () => {
+      const { data } = await supabase
+        .from("gcLogLive")
+        .select("id,gcCode,location,other")
+        .order("createdAt", { ascending: true })
+        .limit(15);
+      setRows((data as GCRow[]) ?? []);
+    };
+
+    load();
 
     const channel = supabase
-      .channel("custom-all-channel")
+      .channel("gcLogLive-realtime")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "rosterlive" },
-        (payload) => {
-          console.log("Change received!", payload);
-          fetchRoster();
-        }
+        { event: "*", schema: "public", table: "gcLogLive" },
+        load
       )
       .subscribe();
 
@@ -38,22 +44,17 @@ export default function HomePage() {
     };
   }, []);
 
-  async function fetchRoster() {
-    const { data } = await supabase.from("rosterlive").select("*").order("id");
-    if (data) setRows(data);
-  }
-
-  async function updateRow(id: number, column: string, value: string) {
-    await supabase.from("rosterlive").update({ [column]: value }).eq("id", id);
+  async function updateRow(id: string, patch: Partial<GCRow>) {
+    await supabase.from("gcLogLive").update(patch).eq("id", id);
   }
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h1>Pilot Station Time (Cloud Live-Sync)</h1>
+    <div style={{ padding: 20 }}>
+      <h1>Pilot Station Time — GC Log (live sync)</h1>
       <table border={1} cellPadding={8}>
         <thead>
           <tr>
-            <th>GC</th>
+            <th>GC (3 letters)</th>
             <th>Location</th>
             <th>Other</th>
           </tr>
@@ -63,22 +64,24 @@ export default function HomePage() {
             <tr key={row.id}>
               <td>
                 <input
-                  value={row.gc || ""}
+                  value={row.gcCode ?? ""}
                   maxLength={3}
-                  onChange={(e) => updateRow(row.id, "gc", e.target.value)}
+                  onChange={(e) =>
+                    updateRow(row.id, { gcCode: e.target.value.toUpperCase() })
+                  }
                 />
               </td>
               <td>
                 <input
-                  value={row.location || ""}
-                  onChange={(e) => updateRow(row.id, "location", e.target.value)}
+                  value={row.location ?? ""}
+                  onChange={(e) => updateRow(row.id, { location: e.target.value })}
                   list="locations"
                 />
               </td>
               <td>
                 <input
-                  value={row.other || ""}
-                  onChange={(e) => updateRow(row.id, "other", e.target.value)}
+                  value={row.other ?? ""}
+                  onChange={(e) => updateRow(row.id, { other: e.target.value })}
                 />
               </td>
             </tr>
